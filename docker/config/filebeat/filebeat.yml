@@ -1,0 +1,25 @@
+name: filebeat
+setup.template:
+  enabled: true
+output.elasticsearch.username: ${ELASTIC_USERNAME}
+output.elasticsearch.password: ${ELASTIC_PASSWORD}
+path.config: ${CONFIG_DIR}
+
+filebeat.inputs:
+    - type: filestream
+      paths: 
+        - "/var/log/syslog.log"
+
+output.logstash:
+    enabled: true
+    hosts: ["logstash:5044"]
+    ssl.certificate_authorities: ["${CONFIG_DIR}/ca.crt"]
+    ssl.certificate: "${CONFIG_DIR}/filebeat.crt"
+    ssl.key: "${CONFIG_DIR}/filebeat.key"
+  
+output.elasticsearch:
+  enabled: false
+  hosts: ["https://elasticsearch:9200"]
+  ssl.certificate_authorities: ["${CONFIG_DIR}/ca.crt"]
+  ssl.certificate: "${CONFIG_DIR}/filebeat.crt"
+  ssl.key: "${CONFIG_DIR}/filebeat.key"

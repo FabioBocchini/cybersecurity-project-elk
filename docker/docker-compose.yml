@@ -1,0 +1,170 @@
+version: '3.8'
+
+volumes:
+  data:
+
+secrets:
+  ca.crt:
+    file: ./secrets/certificate_authority/ca/ca.crt
+  elasticsearch.keystore:
+    file: ./secrets/elasticsearch.keystore
+  elastic-stack-ca.p12:
+    file: ./secrets/certificate_authority/elastic-stack-ca.p12
+  elasticsearch.key:
+    file: ./secrets/certificates/elasticsearch/elasticsearch.key
+  elasticsearch.cert:
+    file: ./secrets/certificates/elasticsearch/elasticsearch.crt
+  kibana.key:
+    file: ./secrets/certificates/kibana/kibana.key
+  kibana.cert:
+    file: ./secrets/certificates/kibana/kibana.crt
+  logstash.pkcs8.key:
+    file: ./secrets/certificates/logstash/logstash.pkcs8.key
+  logstash.key:
+    file: ./secrets/certificates/logstash/logstash.key
+  logstash.p12:
+    file: ./secrets/keystores/logstash/logstash.p12
+  logstash.cert:
+    file: ./secrets/certificates/logstash/logstash.crt
+  filebeat.key:
+    file: ./secrets/certificates/filebeat/filebeat.key
+  filebeat.cert:
+    file: ./secrets/certificates/filebeat/filebeat.crt
+
+services:
+  elasticsearch: 
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_VERSION}
+    container_name: elasticsearch
+    environment:
+      CONFIG_DIR: ${ELASTIC_DIR}/config
+      ELASTIC_USERNAME: ${ELASTIC_USERNAME}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      ES_JAVA_OPTS: -Xmx${ELASTICSEARCH_HEAP} -Xms${ELASTICSEARCH_HEAP}
+      bootstrap.memory_lock: "true"
+      discovery.type: single-node
+    healthcheck:
+      test: curl --fail elasticsearch:9200  || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 100
+    hostname: elasticsearch
+    networks:
+      - cyber-network
+    ports:
+      - 9200:9200
+    restart: unless-stopped
+    secrets:
+      - source: elasticsearch.keystore
+        target: ${ELASTIC_DIR}/config/elasticsearch.keystore
+      - source: ca.crt
+        target: ${ELASTIC_DIR}/config/ca.crt
+      - source: elasticsearch.cert
+        target: ${ELASTIC_DIR}/config/elasticsearch.crt
+      - source: elasticsearch.key
+        target: ${ELASTIC_DIR}/config/elasticsearch.key
+    volumes:
+      - data:${ELASTIC_DIR}
+      - ./config/elasticsearch/elasticsearch.yml:${ELASTIC_DIR}/config/elasticsearch.yml:ro
+
+  kibana: 
+    image: docker.elastic.co/kibana/kibana:${ELK_VERSION}
+    container_name: kibana
+    depends_on: 
+      - elasticsearch
+    environment:
+      CONFIG_DIR: ${KIBANA_DIR}/config
+      ELASTIC_USERNAME: ${ELASTIC_USERNAME}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      ENCRYPTION_KEY: ${XPACK_ENCRYPTION_KEY}
+      KIBANA_URL: ${KIBANA_URL}
+    healthcheck:
+      test: curl --fail kibana:4601 || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 100
+    hostname: kibana
+    networks:
+      - cyber-network
+    ports:
+      - 5601:5601
+    restart: unless-stopped
+    secrets:
+      - source: ca.crt
+        target: ${KIBANA_DIR}/config/ca.crt
+      - source: kibana.cert
+        target: ${KIBANA_DIR}/config/kibana.crt
+      - source: kibana.key
+        target: ${KIBANA_DIR}/config/kibana.key
+    volumes:
+      - ./config/kibana/kibana.yml:${KIBANA_DIR}/config/kibana.yml:ro
+
+  logstash: 
+    image: docker.elastic.co/logstash/logstash:${ELK_VERSION}
+    container_name: logstash
+    depends_on: 
+    - elasticsearch
+    - kibana
+    environment:
+      path.settings: null
+      CONFIG_DIR: ${LOGSTASH_DIR}/config
+      ELASTIC_USERNAME: ${ELASTIC_USERNAME}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      LS_JAVA_OPTS: "-Xmx${LOGSTASH_HEAP} -Xms${LOGSTASH_HEAP}"
+    hostname: logstash
+    networks:
+      - cyber-network
+    ports:
+      - 5044:5044
+      - 5045:5045
+    restart: unless-stopped
+    secrets:
+      - source: ca.crt
+        target: ${LOGSTASH_DIR}/config/ca.crt
+      - source: logstash.cert
+        target: ${LOGSTASH_DIR}/config/logstash.crt
+      - source: logstash.pkcs8.key
+        target: ${LOGSTASH_DIR}/config/logstash.pkcs8.key
+      - source: logstash.key
+        target: ${LOGSTASH_DIR}/config/logstash.key
+      - source: logstash.p12
+        target: ${LOGSTASH_DIR}/config/logstash.p12
+    volumes:
+      - ./config/logstash/logstash.yml:${LOGSTASH_DIR}/config/logstash.yml
+      - ./config/logstash/pipeline/logstash.conf:${LOGSTASH_DIR}/pipeline/logstash.conf
+      - ./config/logstash/pipeline/patterns/iptables.pattern:${LOGSTASH_DIR}/pipeline/patterns/iptables.pattern
+
+  filebeat:
+    build: ./config/filebeat
+    command: filebeat -e -d "publish" && tail -f /dev/null
+    cap_add:
+      - NET_ADMIN
+    container_name: filebeat
+    depends_on: 
+    - elasticsearch
+    - kibana
+    environment:
+      CONFIG_DIR: ${FILEBEAT_DIR}/config
+      LS_JAVA_OPTS: "-Xmx${FILEBEAT_HEAP} -Xms${FILEBEAT_HEAP}"
+      ELASTIC_USERNAME: ${ELASTIC_USERNAME}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+    hostname: filebeat
+    networks:
+      - cyber-network
+    ports:
+      - 21:21
+      - 22:22
+      - 80:80
+      - 9000:9000
+    secrets:
+      - source: ca.crt
+        target: ${FILEBEAT_DIR}/config/ca.crt
+      - source: filebeat.cert
+        target: ${FILEBEAT_DIR}/config/filebeat.crt
+      - source: filebeat.key
+        target: ${FILEBEAT_DIR}/config/filebeat.key
+    volumes: 
+      - ./config/filebeat/filebeat.yml:${FILEBEAT_DIR}/filebeat.yml:ro
+
+networks:
+  cyber-network:
+    driver: bridge
